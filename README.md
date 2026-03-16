@@ -1,5 +1,8 @@
 # OpenClaw Tamagotchi Display v2.3
 
+![Tamagotchi Display](screenshot.png)
+
+
 A beautiful wall-mounted display for OpenClaw/Claude, optimized for 7-inch touchscreens (1024x600).
 
 ## Features

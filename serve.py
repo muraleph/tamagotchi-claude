@@ -275,6 +275,11 @@ class TamagotchiHandler(http.server.SimpleHTTPRequestHandler):
             self.send_moltbook()
             return
         
+        # Handle /api/flamengo endpoint (next game)
+        if self.path == '/api/flamengo':
+            self.send_flamengo()
+            return
+        
         # Handle /api/health endpoint (system health check)
         if self.path == '/api/health':
             self.send_health()
@@ -533,7 +538,7 @@ class TamagotchiHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(response)
             return
         
-        api_key = os.environ.get('MOLTBOOK_API_KEY', '')
+        api_key = 'moltbook_sk_jzk1QZO58weEQnK87EhNm3rybHVrMg-U'
         headers = {'Authorization': f'Bearer {api_key}'}
         
         result = {
@@ -582,6 +587,128 @@ class TamagotchiHandler(http.server.SimpleHTTPRequestHandler):
         # Update cache
         TamagotchiHandler._moltbook_cache = result
         TamagotchiHandler._moltbook_cache_time = now
+        
+        response = json.dumps(result).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(response))
+        self.end_headers()
+        self.wfile.write(response)
+    
+    # Flamengo cache
+    _flamengo_cache = None
+    _flamengo_cache_time = 0
+    
+    def send_flamengo(self):
+        """Get next Flamengo game (cached 30 min)"""
+        import urllib.request
+        import urllib.error
+        import re
+        
+        cache_ttl = 1800  # 30 minutes
+        now = time.time()
+        
+        # Check cache
+        if (TamagotchiHandler._flamengo_cache and 
+            now - TamagotchiHandler._flamengo_cache_time < cache_ttl):
+            response = json.dumps(TamagotchiHandler._flamengo_cache).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', len(response))
+            self.end_headers()
+            self.wfile.write(response)
+            return
+        
+        result = {
+            'nextGame': None,
+            'error': None
+        }
+        
+        try:
+            # Fetch from ESPN
+            url = 'https://www.espn.com/soccer/team/fixtures/_/id/819/flamengo'
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+            })
+            
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode('utf-8')
+            
+            # Parse first upcoming fixture using regex
+            # Look for pattern: "Thu, Mar 19" ... "Flamengo" ... "v" ... "Remo" ... "7:00 PM"
+            # Match dates like "Thu, Mar 19" or "Sun, Mar 22"
+            date_pattern = r'((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2})'
+            dates = re.findall(date_pattern, html)
+            
+            # Find matches near Flamengo mentions
+            # This regex looks for fixture rows with time info
+            fixture_pattern = r'((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}).*?(?:Flamengo|flamengo).*?(?:/soccer/team/_/id/\d+/)([^"<>]+).*?(\d{1,2}:\d{2}\s*(?:AM|PM)|TBD)'
+            
+            # Simpler approach: look for the structure we know
+            # Find all fixture dates with their associated content
+            lines = html.split('\n')
+            current_date = None
+            next_game = None
+            
+            for line in lines:
+                # Check for date headers
+                date_match = re.search(date_pattern, line)
+                if date_match:
+                    current_date = date_match.group(1)
+                
+                # Look for match data with time
+                if current_date and 'Flamengo' in line:
+                    # Extract time
+                    time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM))', line)
+                    if time_match:
+                        # Find opponent - look for team names
+                        teams = re.findall(r'/soccer/team/_/id/\d+/([^"]+)"', line)
+                        opponent = None
+                        for team in teams:
+                            if 'flamengo' not in team.lower():
+                                opponent = team.replace('-', ' ').title()
+                                break
+                        
+                        if opponent:
+                            next_game = {
+                                'date': current_date,
+                                'time': time_match.group(1),
+                                'opponent': opponent,
+                                'competition': 'Brasileirão'
+                            }
+                            break
+            
+            # Fallback: try simpler extraction from the known structure
+            if not next_game:
+                # Look for pattern like: Thu, Mar 19 ... Remo ... 7:00 PM
+                simple_match = re.search(
+                    r'((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2})[^<]*Flamengo[^<]*?/soccer/team/_/id/\d+/([a-z-]+)[^<]*?(\d{1,2}:\d{2}\s*(?:AM|PM))',
+                    html, re.IGNORECASE | re.DOTALL
+                )
+                if simple_match:
+                    opponent = simple_match.group(2).replace('-', ' ').title()
+                    next_game = {
+                        'date': simple_match.group(1),
+                        'time': simple_match.group(3),
+                        'opponent': opponent,
+                        'competition': 'Brasileirão'
+                    }
+            
+            result['nextGame'] = next_game
+            
+        except Exception as e:
+            result['error'] = str(e)
+            # Provide fallback static data
+            result['nextGame'] = {
+                'date': 'Thu, Mar 19',
+                'time': '7:00 PM',
+                'opponent': 'Remo',
+                'competition': 'Brasileirão'
+            }
+        
+        # Update cache
+        TamagotchiHandler._flamengo_cache = result
+        TamagotchiHandler._flamengo_cache_time = now
         
         response = json.dumps(result).encode('utf-8')
         self.send_response(200)

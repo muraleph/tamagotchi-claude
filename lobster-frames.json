@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "name": "Lobster Avatar Animation Frames",
+    "version": "1.1.0",
+    "created": "2026-02-15",
+    "width": 14,
+    "height": 3,
+    "description": "Perfectly aligned ASCII lobster animation frames. Body stays centered, only antennae/decorations animate."
+  },
+  "animations": {
+    "idle": {
+      "description": "Subtle antenna movement, occasional blink",
+      "frameRate": 800,
+      "loop": true,
+      "frames": [
+        ["  \\|  |/      ", "  )=[°_°]=(   ", "    /^^\\      "],
+        ["  \\|  |/      ", "  )=[°‿°]=(   ", "    /^^\\      "],
+        ["   \\||/       ", "  )=[°_°]=(   ", "    /^^\\      "]
+      ]
+    },
+    "happy": {
+      "description": "Wide antennae, bouncing motion, big smile",
+      "frameRate": 250,
+      "loop": true,
+      "frames": [
+        [" \\|    |/     ", "  )=[^_^]=(   ", "    /^^\\      "],
+        ["  \\|  |/      ", "  )=[^o^]=(   ", "   /^^\\       "],
+        [" \\|    |/     ", "  )=[^‿^]=(   ", "    /^^\\      "],
+        ["  \\|  |/      ", "  )=[^_^]=(   ", "   /^^\\       "]
+      ]
+    },
+    "sleepy": {
+      "description": "Drooping antennae, heavy eyelids",
+      "frameRate": 1500,
+      "loop": true,
+      "frames": [
+        ["   \\\\//       ", "  )=[- -]=(   ", "    /^^\\      "],
+        ["    \\/        ", "  )=[-_-]=(   ", "    /^^\\      "]
+      ]
+    },
+    "overwhelmed": {
+      "description": "Rapid shake left-center-right",
+      "frameRate": 80,
+      "loop": true,
+      "frames": [
+        [" ~\\|  |/      ", " ~)=[@_@]=(   ", "  ~/^^\\       "],
+        ["  \\|  |/      ", "  )=[@_@]=(   ", "   /^^\\       "],
+        ["  \\|  |/~     ", "  )=[@_@]=(~  ", "   /^^\\~      "]
+      ]
+    },
+    "thinking": {
+      "description": "Thought bubbles rise, contemplative expression",
+      "frameRate": 700,
+      "loop": true,
+      "frames": [
+        ["  \\|  |/      ", "  )=[o_o]=(   ", "    /^^\\   °  "],
+        ["  \\|  |/   °  ", "  )=[o.o]=(   ", "    /^^\\      "],
+        ["  \\|  |/ °°   ", "  )=[ō_ō]=(   ", "    /^^\\      "]
+      ]
+    },
+    "frustrated": {
+      "description": "Claws crossing, annoyed expression",
+      "frameRate": 350,
+      "loop": true,
+      "frames": [
+        ["  \\|  |/      ", "  )=X>_<X=(   ", "    /^^\\      "],
+        ["  \\|  |/      ", " (=X>_<X=)    ", "    /^^\\      "],
+        ["  \\|  |/      ", "  X=>_<=X     ", "    /^^\\      "]
+      ]
+    }
+  },
+  "static": {
+    "description": "Single-frame states for static display",
+    "neutral": ["  \\|  |/      ", "  )=[°_°]=(   ", "    /^^\\      "],
+    "happy": [" \\|    |/     ", "  )=[^_^]=(   ", "    /^^\\      "],
+    "sleepy": ["   \\\\//       ", "  )=[- -]=(   ", "    /^^\\      "],
+    "overwhelmed": ["  \\|  |/      ", "  )=[@_@]=(   ", "   /^^\\       "],
+    "thinking": ["  \\|  |/   °  ", "  )=[o_o]=(   ", "    /^^\\      "],
+    "frustrated": ["  \\|  |/      ", " (=X>_<X=)    ", "    /^^\\      "]
+  }
+}

@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1024, height=600, initial-scale=1.0, user-scalable=no">
+    <title>Claude Tamagotchi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="websocket.js?v=18"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            image-rendering: pixelated;
+        }
+        
+        :root {
+            --lcd-bg: #9bbc0f;
+            --lcd-light: #8bac0f;
+            --lcd-dark: #306230;
+            --lcd-darkest: #0f380f;
+            --lcd-glow: rgba(155, 188, 15, 0.3);
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Press Start 2P', monospace;
+            background: #1a1a1a;
+            overflow: hidden;
+            touch-action: manipulation;
+            user-select: none;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        /* ==================== PIXEL ICONS (CSS-based) ==================== */
+        .px-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            image-rendering: pixelated;
+            vertical-align: middle;
+        }
+        
+        .px-icon.large {
+            width: 24px;
+            height: 24px;
+        }
+        
+        /* Pixel heart */
+        .px-heart {
+            width: 14px;
+            height: 12px;
+            background: var(--lcd-darkest);
+            position: relative;
+            transform: rotate(-45deg);
+            margin: 2px 4px;
+        }
+        .px-heart::before,
+        .px-heart::after {
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 12px;
+            background: var(--lcd-darkest);
+            border-radius: 50%;
+        }
+        .px-heart::before { top: -6px; left: 0; }
+        .px-heart::after { left: 6px; top: 0; }
+        .px-heart.empty { background: var(--lcd-dark); opacity: 0.4; }
+        .px-heart.empty::before, .px-heart.empty::after { background: var(--lcd-dark); }
+        .px-heart.critical { animation: heartBlink 0.5s infinite; }
+        
+        @keyframes heartBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        /* ==================== FULL SCREEN LCD ==================== */
+        .lcd-screen {
+            width: 100vw;
+            height: 100vh;
+            background: var(--lcd-bg);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .lcd-screen.scanlines::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.03) 2px,
+                rgba(0, 0, 0, 0.03) 4px
+            );
+            pointer-events: none;
+            z-index: 1000;
+        }
+        
+        /* ==================== STATUS BAR (Top) ==================== */
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            background: var(--lcd-light);
+            border-bottom: 3px solid var(--lcd-darkest);
+            flex-shrink: 0;
+            min-height: 36px;
+        }
+        
+        .status-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--lcd-darkest);
+        }
+        
+        .status-label {
+            font-size: 9px;
+            opacity: 0.8;
+        }
+        
+        /* Hearts container for context */
+        .hearts {
+            display: flex;
+            gap: 2px;
+            align-items: center;
+        }
+        
+        /* WS indicator */
+        .ws-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--lcd-dark);
+        }
+        .ws-dot.connected {
+            background: var(--lcd-darkest);
+            animation: wsPulse 2s infinite;
+        }
+        .ws-dot.connecting {
+            animation: wsConnecting 0.5s infinite;
+        }
+        .ws-dot.error {
+            background: #8b0000;
+        }
+        @keyframes wsPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        @keyframes wsConnecting {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.2; }
+        }
+        
+        /* ==================== VIEW SYSTEM ==================== */
+        .view-container {
+            flex: 1;
+            display: none;
+            overflow: hidden;
+        }
+        .view-container.active {
+            display: flex;
+        }
+        
+        /* ==================== HOME VIEW ==================== */
+        .home-view {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            grid-template-rows: 1fr auto;
+            gap: 6px;
+            padding: 6px;
+            height: 100%;
+            width: 100%;
+        }
+        
+        /* Main creature area (left side) */
+        .creature-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            position: relative;
+            background: rgba(139, 172, 15, 0.3);
+            border: 3px solid var(--lcd-darkest);
+        }
+        
+        /* ASCII Lobster - BIGGER */
+        .ascii-lobster {
+            font-family: 'Courier New', 'Monaco', monospace;
+            font-size: 48px;
+            line-height: 1.1;
+            color: var(--lcd-darkest);
+            white-space: pre;
+            text-align: center;
+            letter-spacing: 6px;
+            min-height: 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* State label and duration */
+        .state-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .state-label {
+            font-size: 24px;
+            color: var(--lcd-darkest);
+            text-transform: uppercase;
+            letter-spacing: 4px;
+        }
+        
+        .state-duration {
+            font-size: 16px;
+            color: var(--lcd-dark);
+            padding: 6px 16px;
+            background: rgba(48, 98, 48, 0.25);
+            border: 2px solid var(--lcd-dark);
+        }
+        .state-duration.working {
+            animation: durationPulse 1.5s infinite;
+        }
+        @keyframes durationPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Mood indicator - ASCII faces */
+        .mood-indicator {
+            font-size: 28px;
+            font-family: 'Courier New', monospace;
+            color: var(--lcd-darkest);
+            letter-spacing: 0;
+            margin-top: 4px;
+        }
+        
+        /* Activity text - bigger */
+        .activity-text {
+            font-size: 14px;
+            text-align: center;
+            color: var(--lcd-darkest);
+            max-width: 550px;
+            line-height: 1.5;
+            padding: 8px 12px;
+            background: rgba(48, 98, 48, 0.15);
+            border: 2px solid var(--lcd-dark);
+        }
+        
+        /* Thought bubble */
+        .thought-bubble {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            border-radius: 12px;
+            padding: 10px 14px;
+            max-width: 200px;
+            font-size: 12px;
+            color: var(--lcd-darkest);
+            line-height: 1.4;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.3s ease;
+            z-index: 100;
+        }
+        .thought-bubble::before {
+            content: '...';
+            position: absolute;
+            bottom: -18px;
+            left: 12px;
+            font-size: 14px;
+            color: var(--lcd-darkest);
+        }
+        .thought-bubble.visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+        
+        /* Side panel (right side) - denser */
+        .side-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .info-box {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 8px 10px;
+            flex-shrink: 0;
+        }
+        
+        .info-box-title {
+            font-size: 10px;
+            margin-bottom: 6px;
+            border-bottom: 2px solid var(--lcd-darkest);
+            padding-bottom: 4px;
+            color: var(--lcd-darkest);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            margin: 5px 0;
+            color: var(--lcd-darkest);
+        }
+        
+        .info-value {
+            font-weight: bold;
+        }
+        
+        /* Progress bars - chunkier */
+        .pixel-progress {
+            height: 12px;
+            background: var(--lcd-dark);
+            border: 2px solid var(--lcd-darkest);
+            position: relative;
+            margin: 4px 0;
+        }
+        
+        .pixel-progress-fill {
+            height: 100%;
+            background: var(--lcd-darkest);
+            transition: width 0.3s;
+        }
+        
+        /* Message preview */
+        .message-preview {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 8px;
+            border-left: 5px solid var(--lcd-darkest);
+        }
+        
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: var(--lcd-dark);
+            margin-bottom: 5px;
+        }
+        
+        .preview-content {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        
+        .preview-avatar {
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            flex-shrink: 0;
+            padding: 2px 4px;
+            background: rgba(48, 98, 48, 0.2);
+            border: 1px solid var(--lcd-dark);
+        }
+        
+        .preview-text {
+            font-size: 10px;
+            color: var(--lcd-darkest);
+            line-height: 1.4;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        
+        /* Activity log */
+        .activity-log {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 8px;
+            flex: 1;
+            min-height: 60px;
+            max-height: 90px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            font-size: 9px;
+            color: var(--lcd-darkest);
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(48, 98, 48, 0.3);
+            line-height: 1.3;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-time {
+            color: var(--lcd-dark);
+            margin-right: 6px;
+        }
+        
+        /* Subagents panel */
+        .subagents-panel {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 8px;
+            display: none;
+        }
+        .subagents-panel.active {
+            display: block;
+        }
+        
+        .subagent-item {
+            font-size: 10px;
+            color: var(--lcd-darkest);
+            padding: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .subagent-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--lcd-darkest);
+            animation: wsPulse 1s infinite;
+        }
+        
+        /* Ticker area */
+        .ticker-area {
+            grid-column: 1 / -1;
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 6px;
+            overflow: hidden;
+        }
+        
+        .ticker-content {
+            display: flex;
+            gap: 50px;
+            font-size: 13px;
+            color: var(--lcd-darkest);
+            white-space: nowrap;
+            animation: tickerScroll 40s linear infinite;
+        }
+        
+        @keyframes tickerScroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        
+        .ticker-item {
+            display: flex;
+            gap: 8px;
+        }
+        
+        /* ==================== CHARTS VIEW ==================== */
+        .charts-view {
+            flex-direction: column;
+            padding: 8px;
+            gap: 8px;
+            overflow-y: auto;
+            width: 100%;
+        }
+        
+        .charts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+        }
+        
+        .charts-header h2 {
+            font-size: 16px;
+            color: var(--lcd-darkest);
+            margin: 0;
+        }
+        
+        .chart-timeframe {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .timeframe-btn {
+            background: var(--lcd-dark);
+            border: 2px solid var(--lcd-darkest);
+            padding: 8px 14px;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 10px;
+            color: var(--lcd-darkest);
+            cursor: pointer;
+        }
+        
+        .timeframe-btn.active {
+            background: var(--lcd-darkest);
+            color: var(--lcd-bg);
+        }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            flex: 1;
+        }
+        
+        .chart-card {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .chart-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .chart-card-title {
+            font-size: 14px;
+            color: var(--lcd-darkest);
+        }
+        
+        .chart-card-price {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--lcd-darkest);
+        }
+        
+        .chart-card-change {
+            font-size: 11px;
+            padding: 3px 6px;
+            background: rgba(48, 98, 48, 0.3);
+        }
+        
+        .chart-card-change.positive { color: #306230; }
+        .chart-card-change.negative { color: #8b0000; }
+        
+        .chart-container {
+            flex: 1;
+            min-height: 200px;
+            position: relative;
+        }
+        
+        .chart-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12px;
+            color: var(--lcd-dark);
+        }
+        
+        /* ==================== STATS VIEW ==================== */
+        .stats-view {
+            flex-direction: column;
+            padding: 8px;
+            gap: 8px;
+            overflow-y: auto;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+        
+        .stat-box {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 12px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            color: var(--lcd-darkest);
+            margin: 8px 0;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            color: var(--lcd-dark);
+        }
+        
+        /* Schedule list */
+        .schedule-section {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 10px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .section-title {
+            font-size: 12px;
+            color: var(--lcd-darkest);
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--lcd-darkest);
+        }
+        
+        .schedule-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: rgba(48, 98, 48, 0.1);
+            margin-bottom: 6px;
+            border-left: 4px solid var(--lcd-darkest);
+        }
+        
+        .schedule-icon {
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            padding: 4px 6px;
+            background: rgba(48, 98, 48, 0.2);
+            border: 1px solid var(--lcd-dark);
+        }
+        
+        .schedule-info {
+            flex: 1;
+        }
+        
+        .schedule-name {
+            font-size: 11px;
+            color: var(--lcd-darkest);
+        }
+        
+        .schedule-time {
+            font-size: 9px;
+            color: var(--lcd-dark);
+            margin-top: 2px;
+        }
+        
+        .schedule-empty {
+            text-align: center;
+            padding: 20px;
+            font-size: 11px;
+            color: var(--lcd-dark);
+        }
+        
+        /* ==================== BUILT VIEW ==================== */
+        .built-view {
+            flex-direction: column;
+            padding: 8px;
+            gap: 8px;
+            overflow-y: auto;
+        }
+        
+        .built-header {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .built-header h2 {
+            font-size: 16px;
+            color: var(--lcd-darkest);
+            margin: 0;
+        }
+        
+        .built-stats {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .built-stat {
+            font-size: 11px;
+            color: var(--lcd-darkest);
+            background: rgba(48, 98, 48, 0.2);
+            padding: 5px 10px;
+        }
+        
+        .built-sections {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            flex: 1;
+        }
+        
+        .built-section {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 10px;
+            overflow-y: auto;
+        }
+        
+        .built-section h3 {
+            font-size: 11px;
+            color: var(--lcd-darkest);
+            margin: 0 0 8px 0;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--lcd-darkest);
+        }
+        
+        .commits-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .commit-item {
+            background: rgba(48, 98, 48, 0.15);
+            padding: 8px;
+            border-left: 4px solid var(--lcd-darkest);
+        }
+        
+        .commit-hash {
+            font-size: 9px;
+            color: var(--lcd-dark);
+        }
+        
+        .commit-msg {
+            font-size: 10px;
+            color: var(--lcd-darkest);
+            margin-top: 3px;
+            line-height: 1.3;
+        }
+        
+        .commit-time {
+            font-size: 8px;
+            color: var(--lcd-dark);
+            margin-top: 2px;
+        }
+        
+        .art-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .art-item {
+            background: rgba(48, 98, 48, 0.15);
+            border: 2px solid var(--lcd-dark);
+        }
+        
+        .art-item-header {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 8px;
+            background: rgba(48, 98, 48, 0.2);
+            font-size: 9px;
+        }
+        
+        .art-type { color: var(--lcd-darkest); }
+        .art-date { color: var(--lcd-dark); }
+        
+        .art-content {
+            padding: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 8px;
+            white-space: pre;
+            overflow-x: auto;
+            max-height: 100px;
+            line-height: 1.2;
+            color: var(--lcd-darkest);
+        }
+        
+        .loading-placeholder {
+            text-align: center;
+            padding: 16px;
+            font-size: 11px;
+            color: var(--lcd-dark);
+        }
+        
+        /* ==================== SETTINGS VIEW ==================== */
+        .settings-view {
+            flex-direction: column;
+            padding: 8px;
+            gap: 8px;
+            overflow-y: auto;
+        }
+        
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        
+        .settings-section {
+            background: var(--lcd-light);
+            border: 3px solid var(--lcd-darkest);
+            padding: 12px;
+        }
+        
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(48, 98, 48, 0.3);
+        }
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+        
+        .setting-label {
+            font-size: 11px;
+            color: var(--lcd-darkest);
+        }
+        
+        .pixel-toggle {
+            width: 46px;
+            height: 24px;
+            background: var(--lcd-dark);
+            border: 2px solid var(--lcd-darkest);
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .pixel-toggle.active {
+            background: var(--lcd-darkest);
+        }
+        
+        .pixel-toggle::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 100%;
+            background: var(--lcd-bg);
+            left: 0;
+            transition: left 0.2s;
+        }
+        
+        .pixel-toggle.active::after {
+            left: calc(100% - 16px);
+        }
+        
+        /* Weather display in settings */
+        .weather-display {
+            text-align: center;
+        }
+        
+        .weather-icon {
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            margin: 8px 0;
+            padding: 8px 16px;
+            background: rgba(48, 98, 48, 0.15);
+            border: 2px solid var(--lcd-dark);
+            display: inline-block;
+        }
+        
+        .weather-temp {
+            font-size: 20px;
+            color: var(--lcd-darkest);
+        }
+        
+        .weather-desc {
+            font-size: 10px;
+            color: var(--lcd-dark);
+            margin-top: 4px;
+        }
+        
+        /* ==================== TAMAGOTCHI BOTTOM NAV ==================== */
+        .bottom-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--lcd-darkest);
+            border-top: 4px solid #000;
+            flex-shrink: 0;
+            min-height: 56px;
+        }
+        
+        /* Classic tamagotchi-style 3-button cluster with page indicators */
+        .nav-cluster {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* Page indicator dots */
+        .page-dots {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 0 8px;
+        }
+        
+        .page-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--lcd-dark);
+            border: 1px solid var(--lcd-light);
+            cursor: pointer;
+        }
+        
+        .page-dot.active {
+            background: var(--lcd-bg);
+        }
+        
+        /* Tamagotchi button style - circular with label */
+        .tama-btn {
+            width: 54px;
+            height: 54px;
+            background: radial-gradient(circle at 30% 30%, #4a4a4a, #1a1a1a);
+            border: 3px solid #000;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+            box-shadow: 
+                inset 0 2px 4px rgba(255,255,255,0.1),
+                0 4px 8px rgba(0,0,0,0.5);
+            position: relative;
+        }
+        
+        .tama-btn:active {
+            transform: scale(0.92);
+            box-shadow: 
+                inset 0 1px 2px rgba(255,255,255,0.05),
+                0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .tama-btn.active {
+            background: radial-gradient(circle at 30% 30%, #5a6a5a, #2a3a2a);
+            box-shadow: 
+                inset 0 2px 4px rgba(155,188,15,0.2),
+                0 4px 8px rgba(0,0,0,0.5),
+                0 0 10px rgba(155,188,15,0.3);
+        }
+        
+        .tama-btn .btn-letter {
+            font-size: 18px;
+            font-family: 'Press Start 2P', monospace;
+            color: var(--lcd-dark);
+            text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+        }
+        
+        .tama-btn.active .btn-letter {
+            color: var(--lcd-bg);
+            text-shadow: 0 0 4px var(--lcd-glow);
+        }
+        
+        /* Button labels below */
+        .btn-labels {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        
+        .btn-label-item {
+            width: 54px;
+            text-align: center;
+            font-size: 7px;
+            color: var(--lcd-dark);
+        }
+        
+        .btn-label-item.active {
+            color: var(--lcd-bg);
+        }
+        
+        /* Current view indicator */
+        .view-indicator {
+            font-size: 10px;
+            color: var(--lcd-bg);
+            padding: 4px 12px;
+            background: rgba(155, 188, 15, 0.15);
+            border: 2px solid var(--lcd-dark);
+            margin: 0 12px;
+        }
+        
+        /* ==================== SCROLLBAR ==================== */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--lcd-light);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--lcd-darkest);
+        }
+    </style>
+</head>
+<body>
+    <div class="lcd-screen scanlines">
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-group">
+                <div class="status-item">
+                    <span class="ws-dot" id="ws-dot"></span>
+                    <span id="ws-label">WS</span>
+                </div>
+                <div class="status-item">
+                    <span>[</span>
+                    <span id="status-state">IDLE</span>
+                    <span>]</span>
+                </div>
+            </div>
+            
+            <div class="status-group">
+                <div class="status-item">
+                    <span class="status-label">CTX</span>
+                    <div class="hearts" id="context-hearts">
+                        <div class="px-heart"></div>
+                        <div class="px-heart"></div>
+                        <div class="px-heart"></div>
+                        <div class="px-heart"></div>
+                        <div class="px-heart empty"></div>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">$</span>
+                    <span id="status-cost">0.00</span>
+                </div>
+            </div>
+            
+            <div class="status-group">
+                <div class="status-item">
+                    <span class="status-label">CPU</span>
+                    <span id="status-cpu">--%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">RAM</span>
+                    <span id="status-ram">--GB</span>
+                </div>
+            </div>
+            
+            <div class="status-item" style="font-size: 14px;">
+                <span id="clock">00:00</span>
+            </div>
+        </div>
+        
+        <!-- HOME VIEW -->
+        <div class="view-container active" id="view-home">
+            <div class="home-view">
+                <div class="creature-area">
+                    <!-- Thought bubble -->
+                    <div class="thought-bubble" id="thought-bubble">
+                        <span id="thought-text">Hmm...</span>
+                    </div>
+                    
+                    <!-- ASCII Lobster - BIGGER -->
+                    <pre class="ascii-lobster" id="ascii-lobster">  \|  |/     
+  )=[°_°]=(  
+    /^^\     </pre>
+                    
+                    <div class="state-info">
+                        <div class="state-label" id="state-label">IDLE</div>
+                        <div class="state-duration" id="state-duration">0s</div>
+                    </div>
+                    
+                    <div class="mood-indicator" id="mood-indicator">-_-</div>
+                    
+                    <div class="activity-text" id="activity-text">
+                        Waiting for messages...
+                    </div>
+                </div>
+                
+                <div class="side-panel">
+                    <!-- Message Preview -->
+                    <div class="message-preview" id="message-preview">
+                        <div class="preview-header">
+                            <span>LAST MSG</span>
+                            <span id="preview-time">--:--</span>
+                        </div>
+                        <div class="preview-content">
+                            <span class="preview-avatar" id="preview-avatar">&gt;</span>
+                            <span class="preview-text" id="preview-text">Waiting...</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Today's Stats -->
+                    <div class="info-box">
+                        <div class="info-box-title">[TODAY]</div>
+                        <div class="info-row">
+                            <span>TOKENS</span>
+                            <span class="info-value" id="today-tokens">0</span>
+                        </div>
+                        <div class="info-row">
+                            <span>COST</span>
+                            <span class="info-value" id="today-cost">$0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span>MODEL</span>
+                            <span class="info-value" id="today-model">--</span>
+                        </div>
+                    </div>
+                    
+                    <!-- System -->
+                    <div class="info-box">
+                        <div class="info-box-title">[SYSTEM]</div>
+                        <div class="info-row">
+                            <span>CPU</span>
+                            <span class="info-value" id="sys-cpu">--%</span>
+                        </div>
+                        <div class="pixel-progress">
+                            <div class="pixel-progress-fill" id="cpu-bar" style="width: 0%"></div>
+                        </div>
+                        <div class="info-row">
+                            <span>RAM</span>
+                            <span class="info-value" id="sys-ram">--GB</span>
+                        </div>
+                        <div class="pixel-progress">
+                            <div class="pixel-progress-fill" id="ram-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Subagents -->
+                    <div class="subagents-panel" id="subagents-panel">
+                        <div class="info-box-title">[SUBAGENTS]</div>
+                        <div id="subagents-list"></div>
+                    </div>
+                    
+                    <!-- Activity Log -->
+                    <div class="activity-log" id="activity-log">
+                        <div class="log-entry">
+                            <span class="log-time">--:--</span>
+                            System starting...
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Crypto Ticker -->
+                <div class="ticker-area" id="ticker-area">
+                    <div class="ticker-content" id="ticker">
+                        <span class="ticker-item">BTC $--</span>
+                        <span class="ticker-item">ETH $--</span>
+                        <span class="ticker-item">USD R$--</span>
+                        <span class="ticker-item">&lt;*)))&gt;&lt; CLAUDE TAMAGOTCHI</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- CHARTS VIEW -->
+        <div class="view-container" id="view-charts">
+            <div class="charts-view">
+                <div class="charts-header">
+                    <h2>[CRYPTO CHARTS]</h2>
+                    <div class="chart-timeframe">
+                        <button class="timeframe-btn active" data-days="1">24H</button>
+                        <button class="timeframe-btn" data-days="7">7D</button>
+                        <button class="timeframe-btn" data-days="30">30D</button>
+                    </div>
+                </div>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <div class="chart-card-title">BTC BITCOIN</div>
+                            <div>
+                                <span class="chart-card-price" id="btc-chart-price">$---</span>
+                                <span class="chart-card-change positive" id="btc-change">+0.00%</span>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="btc-chart"></canvas>
+                            <div class="chart-loading" id="btc-loading">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <div class="chart-card-title">ETH ETHEREUM</div>
+                            <div>
+                                <span class="chart-card-price" id="eth-chart-price">$---</span>
+                                <span class="chart-card-change positive" id="eth-change">+0.00%</span>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="eth-chart"></canvas>
+                            <div class="chart-loading" id="eth-loading">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- STATS VIEW -->
+        <div class="view-container" id="view-stats">
+            <div class="stats-view">
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">CONTEXT</div>
+                        <div class="stat-value" id="stat-context">--%</div>
+                        <div class="pixel-progress">
+                            <div class="pixel-progress-fill" id="stat-context-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">TODAY COST</div>
+                        <div class="stat-value" id="stat-cost">$--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">TOKENS</div>
+                        <div class="stat-value" id="stat-tokens">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">UPTIME</div>
+                        <div class="stat-value" id="stat-uptime">0m</div>
+                    </div>
+                </div>
+                
+                <div class="schedule-section">
+                    <div class="section-title">[SCHEDULE]</div>
+                    <div id="schedule-list">
+                        <div class="schedule-empty">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- BUILT VIEW -->
+        <div class="view-container" id="view-built">
+            <div class="built-view">
+                <div class="built-header">
+                    <h2>[WHAT I BUILT]</h2>
+                    <div class="built-stats">
+                        <span class="built-stat"><span id="commit-count">0</span> commits</span>
+                        <span class="built-stat"><span id="art-count">0</span> art</span>
+                    </div>
+                </div>
+                
+                <div class="built-sections">
+                    <div class="built-section">
+                        <h3>[RECENT COMMITS]</h3>
+                        <div class="commits-list" id="commits-list">
+                            <div class="loading-placeholder">Loading...</div>
+                        </div>
+                    </div>
+                    
+                    <div class="built-section">
+                        <h3>[ART GALLERY]</h3>
+                        <div class="art-list" id="art-list">
+                            <div class="loading-placeholder">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- SETTINGS VIEW -->
+        <div class="view-container" id="view-settings">
+            <div class="settings-view">
+                <div class="settings-grid">
+                    <div class="settings-section">
+                        <div class="section-title">[DISPLAY]</div>
+                        <div class="setting-item">
+                            <span class="setting-label">SCANLINES</span>
+                            <div class="pixel-toggle" id="toggle-scanlines" onclick="toggleSetting('scanlines')"></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">ANIMATIONS</span>
+                            <div class="pixel-toggle active" id="toggle-animations" onclick="toggleSetting('animations')"></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">CRYPTO TICKER</span>
+                            <div class="pixel-toggle active" id="toggle-ticker" onclick="toggleSetting('ticker')"></div>
+                        </div>
+                        <div class="setting-item">
+                            <span class="setting-label">WEATHER</span>
+                            <div class="pixel-toggle active" id="toggle-weather" onclick="toggleSetting('weather')"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section weather-display" id="weather-box">
+                        <div class="section-title">[WEATHER]</div>
+                        <div class="weather-icon" id="weather-icon">SUN</div>
+                        <div class="weather-temp" id="weather-temp">--C</div>
+                        <div class="weather-desc" id="weather-desc">Sao Paulo</div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="section-title">[ABOUT]</div>
+                    <div class="info-row">
+                        <span>VERSION</span>
+                        <span class="info-value">4.0 TAMA</span>
+                    </div>
+                    <div class="info-row">
+                        <span>GATEWAY</span>
+                        <span class="info-value" id="gateway-status">Checking...</span>
+                    </div>
+                    <div class="info-row">
+                        <span>WEBSOCKET</span>
+                        <span class="info-value" id="ws-status">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tamagotchi-style Bottom Navigation -->
+        <nav class="bottom-nav">
+            <!-- Left page dots -->
+            <div class="page-dots">
+                <div class="page-dot active" data-view="home" onclick="switchView('home')"></div>
+                <div class="page-dot" data-view="charts" onclick="switchView('charts')"></div>
+                <div class="page-dot" data-view="stats" onclick="switchView('stats')"></div>
+                <div class="page-dot" data-view="built" onclick="switchView('built')"></div>
+                <div class="page-dot" data-view="settings" onclick="switchView('settings')"></div>
+            </div>
+            
+            <!-- Classic A B C buttons -->
+            <div class="nav-cluster">
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <button class="tama-btn" id="btn-a" onclick="navAction('prev')">
+                        <span class="btn-letter">A</span>
+                    </button>
+                    <span class="btn-label-item">PREV</span>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <button class="tama-btn active" id="btn-b" onclick="navAction('select')">
+                        <span class="btn-letter">B</span>
+                    </button>
+                    <span class="btn-label-item active" id="btn-b-label">HOME</span>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <button class="tama-btn" id="btn-c" onclick="navAction('next')">
+                        <span class="btn-letter">C</span>
+                    </button>
+                    <span class="btn-label-item">NEXT</span>
+                </div>
+            </div>
+            
+            <!-- View indicator -->
+            <div class="view-indicator" id="view-indicator">HOME</div>
+        </nav>
+    </div>
+    
+    <script>
+        // ==================== STATE ====================
+        let currentView = 'home';
+        let stateStartTime = Date.now();
+        let currentState = 'idle';
+        const startTime = new Date();
+        let chartDays = 1;
+        let btcChart = null;
+        let ethChart = null;
+        
+        const views = ['home', 'charts', 'stats', 'built', 'settings'];
+        const viewLabels = { home: 'HOME', charts: 'CHARTS', stats: 'STATS', built: 'BUILT', settings: 'CONFIG' };
+        
+        const settings = {
+            scanlines: true,
+            animations: true,
+            ticker: true,
+            weather: true
+        };
+        
+        // ==================== LOBSTER ANIMATIONS ====================
+        const lobsterAnimations = {
+            idle: {
+                frameRate: 800,
+                frames: [
+                    ["  \\|  |/     ", "  )=[°_°]=(  ", "    /^^\\     "],
+                    ["  \\|  |/     ", "  )=[°‿°]=(  ", "    /^^\\     "],
+                    ["   \\||/      ", "  )=[°_°]=(  ", "    /^^\\     "]
+                ]
+            },
+            happy: {
+                frameRate: 250,
+                frames: [
+                    [" \\|    |/    ", "  )=[^_^]=(  ", "    /^^\\     "],
+                    ["  \\|  |/     ", "  )=[^o^]=(  ", "   /^^\\      "],
+                    [" \\|    |/    ", "  )=[^‿^]=(  ", "    /^^\\     "]
+                ]
+            },
+            sleepy: {
+                frameRate: 1500,
+                frames: [
+                    ["   \\\\//      ", "  )=[- -]=(  ", "    /^^\\     "],
+                    ["    \\/       ", "  )=[-_-]=(  ", "    /^^\\     "]
+                ]
+            },
+            overwhelmed: {
+                frameRate: 80,
+                frames: [
+                    [" ~\\|  |/     ", " ~)=[@_@]=( ", "  ~/^^\\      "],
+                    ["  \\|  |/     ", "  )=[@_@]=(  ", "   /^^\\      "],
+                    ["  \\|  |/~    ", "  )=[@_@]=(~ ", "   /^^\\~     "]
+                ]
+            },
+            thinking: {
+                frameRate: 700,
+                frames: [
+                    ["  \\|  |/     ", "  )=[o_o]=(  ", "    /^^\\   . "],
+                    ["  \\|  |/   . ", "  )=[o.o]=(  ", "    /^^\\     "],
+                    ["  \\|  |/ ..  ", "  )=[o_o]=(  ", "    /^^\\     "]
+                ]
+            },
+            frustrated: {
+                frameRate: 350,
+                frames: [
+                    ["  \\|  |/     ", "  )=X>_<X=(  ", "    /^^\\     "],
+                    ["  \\|  |/     ", " (=X>_<X=)   ", "    /^^\\     "]
+                ]
+            },
+            working: {
+                frameRate: 400,
+                frames: [
+                    ["  \\|  |/     ", "  )=[*_*]=(  ", "    /^^\\   + "],
+                    ["  \\|  |/   + ", "  )=[*‿*]=(  ", "    /^^\\     "],
+                    ["  \\|  |/     ", "  )=[*_*]=(  ", "   +/^^\\     "]
+                ]
+            }
+        };
+        
+        let currentAnimation = 'idle';
+        let frameIndex = 0;
+        let animationInterval = null;
+        
+        function updateLobsterDisplay() {
+            const el = document.getElementById('ascii-lobster');
+            if (!el || !settings.animations) return;
+            
+            const anim = lobsterAnimations[currentAnimation] || lobsterAnimations.idle;
+            const frame = anim.frames[frameIndex % anim.frames.length];
+            el.textContent = frame.join('\n');
+            frameIndex++;
+        }
+        
+        function setLobsterAnimation(name) {
+            if (currentAnimation === name) return;
+            currentAnimation = name;
+            frameIndex = 0;
+            
+            if (animationInterval) clearInterval(animationInterval);
+            
+            const anim = lobsterAnimations[name] || lobsterAnimations.idle;
+            updateLobsterDisplay();
+            animationInterval = setInterval(updateLobsterDisplay, anim.frameRate);
+        }
+        
+        // ==================== THOUGHT BUBBLES ====================
+        const thoughts = {
+            idle: [
+                "<*)))><", "Existence is weird", "Coffee time?",
+                "Thinking about thinking...", "Wall-mounted life is peaceful",
+                "*digital yawn*", "Any messages?", "...",
+                "The charts are hypnotic", "I exist here now. Neat."
+            ],
+            morning: ["Good morning!", "caffeine.exe", "New day, new tokens"],
+            night: ["Night shift", "The humans sleep", "Just me and the data"],
+            working: ["Processing...", "On it!", "Working hard!", "Crunching..."],
+            happy: ["^_^", "Yay!", "This is nice", "Nice!"]
+        };
+        
+        let lastThoughtTime = 0;
+        
+        function showThought(text, duration = 6000) {
+            const bubble = document.getElementById('thought-bubble');
+            const textEl = document.getElementById('thought-text');
+            textEl.textContent = text;
+            bubble.classList.add('visible');
+            setTimeout(() => bubble.classList.remove('visible'), duration);
+        }
+        
+        function triggerRandomThought() {
+            if (Date.now() - lastThoughtTime < 120000) return;
+            if (Math.random() > 0.2) return;
+            
+            const hour = new Date().getHours();
+            let category = 'idle';
+            if (hour >= 6 && hour < 10) category = 'morning';
+            else if (hour >= 23 || hour < 6) category = 'night';
+            
+            const list = thoughts[category];
+            showThought(list[Math.floor(Math.random() * list.length)]);
+            lastThoughtTime = Date.now();
+        }
+        
+        setInterval(triggerRandomThought, 60000);
+        setTimeout(() => showThought("Just woke up -_-"), 15000);
+        
+        // ==================== VIEW NAVIGATION ====================
+        function switchView(viewName) {
+            currentView = viewName;
+            document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+            document.getElementById('view-' + viewName).classList.add('active');
+            
+            // Update page dots
+            document.querySelectorAll('.page-dot').forEach(d => d.classList.remove('active'));
+            document.querySelector(`.page-dot[data-view="${viewName}"]`).classList.add('active');
+            
+            // Update B button label and view indicator
+            document.getElementById('btn-b-label').textContent = viewLabels[viewName];
+            document.getElementById('view-indicator').textContent = viewLabels[viewName];
+            
+            // Load view-specific data
+            if (viewName === 'charts') {
+                loadCharts();
+            } else if (viewName === 'built') {
+                loadBuiltView();
+            }
+        }
+        
+        // Tamagotchi-style navigation
+        function navAction(action) {
+            const idx = views.indexOf(currentView);
+            if (action === 'prev') {
+                const newIdx = (idx - 1 + views.length) % views.length;
+                switchView(views[newIdx]);
+            } else if (action === 'next') {
+                const newIdx = (idx + 1) % views.length;
+                switchView(views[newIdx]);
+            } else if (action === 'select') {
+                // B button - could toggle details or confirm
+                // For now just stays on current view
+            }
+        }
+        
+        // ==================== SETTINGS ====================
+        function toggleSetting(key) {
+            settings[key] = !settings[key];
+            document.getElementById('toggle-' + key).classList.toggle('active', settings[key]);
+            localStorage.setItem('tama-settings', JSON.stringify(settings));
+            applySettings();
+        }
+        
+        function applySettings() {
+            document.querySelector('.lcd-screen').classList.toggle('scanlines', settings.scanlines);
+            document.getElementById('ticker-area').style.display = settings.ticker ? 'block' : 'none';
+            document.getElementById('weather-box').style.display = settings.weather ? 'block' : 'none';
+        }
+        
+        function loadSettings() {
+            const saved = localStorage.getItem('tama-settings');
+            if (saved) Object.assign(settings, JSON.parse(saved));
+            Object.keys(settings).forEach(key => {
+                const toggle = document.getElementById('toggle-' + key);
+                if (toggle) toggle.classList.toggle('active', settings[key]);
+            });
+            applySettings();
+        }
+        
+        // ==================== STATE MANAGEMENT ====================
+        function setState(state, activity, visualState) {
+            const oldState = currentState;
+            currentState = state;
+            
+            if (state !== oldState) {
+                stateStartTime = Date.now();
+            }
+            
+            document.getElementById('status-state').textContent = state.toUpperCase();
+            document.getElementById('state-label').textContent = state.toUpperCase();
+            document.getElementById('activity-text').textContent = activity || 'Waiting...';
+            
+            // ASCII mood faces instead of emoji
+            const moodMap = {
+                idle: '-_-', thinking: 'o_o', working: '*_*', 
+                happy: '^_^', sleepy: '-.-', overwhelmed: '@_@', frustrated: '>_<'
+            };
+            const vs = visualState || state;
+            document.getElementById('mood-indicator').textContent = moodMap[vs] || '-_-';
+            
+            const lobsterMap = {
+                idle: 'idle', thinking: 'thinking', working: 'working',
+                happy: 'happy', sleepy: 'sleepy', overwhelmed: 'overwhelmed', frustrated: 'frustrated'
+            };
+            setLobsterAnimation(lobsterMap[vs] || 'idle');
+            
+            document.getElementById('state-duration').classList.toggle('working', 
+                state === 'working' || state === 'thinking');
+        }
+        
+        function updateStateDuration() {
+            const elapsed = Date.now() - stateStartTime;
+            let text;
+            if (elapsed < 60000) text = Math.floor(elapsed / 1000) + 's';
+            else if (elapsed < 3600000) text = Math.floor(elapsed / 60000) + 'm';
+            else text = Math.floor(elapsed / 3600000) + 'h';
+            document.getElementById('state-duration').textContent = text;
+        }
+        setInterval(updateStateDuration, 1000);
+        
+        function updateContextHearts(percent) {
+            const hearts = document.querySelectorAll('#context-hearts .px-heart');
+            const filled = Math.ceil((percent / 100) * hearts.length);
+            const critical = percent > 80;
+            hearts.forEach((h, i) => {
+                h.classList.toggle('empty', i >= filled);
+                h.classList.toggle('critical', critical && i < filled);
+            });
+        }
+        
+        // ==================== ACTIVITY LOG ====================
+        function logActivity(text) {
+            const log = document.getElementById('activity-log');
+            const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">${time}</span>${text}`;
+            
+            log.insertBefore(entry, log.firstChild);
+            
+            while (log.children.length > 8) {
+                log.removeChild(log.lastChild);
+            }
+        }
+        
+        // ==================== MESSAGE PREVIEW ====================
+        function updateMessagePreview(text, sender = 'user') {
+            document.getElementById('preview-avatar').textContent = sender === 'user' ? '>' : '<';
+            document.getElementById('preview-text').textContent = text;
+            document.getElementById('preview-time').textContent = 
+                new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
+        
+        // ==================== SUBAGENTS ====================
+        function updateSubagents(subagents) {
+            const panel = document.getElementById('subagents-panel');
+            const list = document.getElementById('subagents-list');
+            
+            if (!subagents || subagents.length === 0) {
+                panel.classList.remove('active');
+                return;
+            }
+            
+            panel.classList.add('active');
+            list.innerHTML = subagents.map(s => `
+                <div class="subagent-item">
+                    <div class="subagent-dot"></div>
+                    <span>${s.label || s}</span>
+                </div>
+            `).join('');
+        }
+        
+        // ==================== CLOCK ====================
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = 
+                now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+        
+        // ==================== UPTIME ====================
+        function updateUptime() {
+            const mins = Math.floor((Date.now() - startTime) / 60000);
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            document.getElementById('stat-uptime').textContent = h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+        setInterval(updateUptime, 30000);
+        
+        // ==================== WEATHER ====================
+        async function updateWeather() {
+            if (!settings.weather) return;
+            try {
+                const res = await fetch('https://wttr.in/Sao_Paulo?format=j1');
+                const data = await res.json();
+                const cur = data.current_condition[0];
+                
+                document.getElementById('weather-temp').textContent = cur.temp_C + 'C';
+                document.getElementById('weather-desc').textContent = cur.weatherDesc[0].value;
+                
+                const code = parseInt(cur.weatherCode);
+                let icon = 'SUN';
+                if (code >= 200 && code < 300) icon = 'STORM';
+                else if (code >= 300 && code < 600) icon = 'RAIN';
+                else if (code >= 600 && code < 700) icon = 'SNOW';
+                else if (code >= 700 && code < 800) icon = 'FOG';
+                else if (code > 800) icon = 'CLOUD';
+                document.getElementById('weather-icon').textContent = icon;
+            } catch (e) {
+                console.error('Weather error:', e);
+            }
+        }
+        
+        // ==================== CRYPTO ====================
+        async function updateCrypto() {
+            if (!settings.ticker) return;
+            try {
+                const [cryptoRes, fxRes] = await Promise.all([
+                    fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd'),
+                    fetch('https://api.exchangerate-api.com/v4/latest/USD')
+                ]);
+                const crypto = await cryptoRes.json();
+                const fx = await fxRes.json();
+                
+                const btc = crypto.bitcoin?.usd?.toLocaleString() || '--';
+                const eth = crypto.ethereum?.usd?.toLocaleString() || '--';
+                const brl = fx.rates?.BRL?.toFixed(2) || '--';
+                
+                const ticker = document.getElementById('ticker');
+                ticker.innerHTML = `
+                    <span class="ticker-item">BTC $${btc}</span>
+                    <span class="ticker-item">ETH $${eth}</span>
+                    <span class="ticker-item">USD R$${brl}</span>
+                    <span class="ticker-item">&lt;*)))&gt;&lt; CLAUDE TAMAGOTCHI</span>
+                    <span class="ticker-item">BTC $${btc}</span>
+                    <span class="ticker-item">ETH $${eth}</span>
+                    <span class="ticker-item">USD R$${brl}</span>
+                    <span class="ticker-item">&lt;*)))&gt;&lt; CLAUDE TAMAGOTCHI</span>
+                `;
+            } catch (e) {
+                console.error('Crypto error:', e);
+            }
+        }
+        
+        // ==================== CHARTS ====================
+        async function loadCharts() {
+            document.getElementById('btc-loading').style.display = 'block';
+            document.getElementById('eth-loading').style.display = 'block';
+            
+            try {
+                const [btcData, ethData] = await Promise.all([
+                    fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${chartDays}`).then(r => r.json()),
+                    fetch(`https://api.coingecko.com/api/v3/coins/ethereum/market_chart?vs_currency=usd&days=${chartDays}`).then(r => r.json())
+                ]);
+                
+                renderChart('btc', btcData, '#306230');
+                renderChart('eth', ethData, '#0f380f');
+                
+                const btcPrices = btcData.prices;
+                const ethPrices = ethData.prices;
+                
+                const btcCurrent = btcPrices[btcPrices.length - 1][1];
+                const btcFirst = btcPrices[0][1];
+                const btcChange = ((btcCurrent - btcFirst) / btcFirst * 100).toFixed(2);
+                
+                const ethCurrent = ethPrices[ethPrices.length - 1][1];
+                const ethFirst = ethPrices[0][1];
+                const ethChange = ((ethCurrent - ethFirst) / ethFirst * 100).toFixed(2);
+                
+                document.getElementById('btc-chart-price').textContent = `$${btcCurrent.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+                document.getElementById('eth-chart-price').textContent = `$${ethCurrent.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+                
+                updateChangeDisplay('btc-change', btcChange);
+                updateChangeDisplay('eth-change', ethChange);
+                
+            } catch (error) {
+                console.error('Chart error:', error);
+            }
+            
+            document.getElementById('btc-loading').style.display = 'none';
+            document.getElementById('eth-loading').style.display = 'none';
+        }
+        
+        function updateChangeDisplay(id, change) {
+            const el = document.getElementById(id);
+            const isPositive = parseFloat(change) >= 0;
+            el.textContent = `${isPositive ? '+' : ''}${change}%`;
+            el.className = `chart-card-change ${isPositive ? 'positive' : 'negative'}`;
+        }
+        
+        function renderChart(coin, data, color) {
+            const ctx = document.getElementById(`${coin}-chart`).getContext('2d');
+            const prices = data.prices;
+            
+            const labels = prices.map(p => {
+                const date = new Date(p[0]);
+                return chartDays === 1 
+                    ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                    : date.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' });
+            });
+            const values = prices.map(p => p[1]);
+            
+            if (coin === 'btc' && btcChart) btcChart.destroy();
+            if (coin === 'eth' && ethChart) ethChart.destroy();
+            
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        borderColor: color,
+                        backgroundColor: `${color}40`,
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHitRadius: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#0f380f',
+                            titleColor: '#9bbc0f',
+                            bodyColor: '#9bbc0f',
+                            titleFont: { family: 'Press Start 2P', size: 10 },
+                            bodyFont: { family: 'Press Start 2P', size: 10 },
+                            callbacks: {
+                                label: (ctx) => `$${ctx.raw.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: { color: 'rgba(48, 98, 48, 0.3)' },
+                            ticks: { 
+                                color: '#306230',
+                                maxTicksLimit: 6,
+                                font: { family: 'Press Start 2P', size: 8 }
+                            }
+                        },
+                        y: {
+                            display: true,
+                            grid: { color: 'rgba(48, 98, 48, 0.3)' },
+                            ticks: { 
+                                color: '#306230',
+                                font: { family: 'Press Start 2P', size: 8 },
+                                callback: (value) => '$' + (value >= 1000 ? (value/1000).toFixed(1) + 'k' : value)
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if (coin === 'btc') btcChart = chart;
+            if (coin === 'eth') ethChart = chart;
+        }
+        
+        // Timeframe buttons
+        document.querySelectorAll('.timeframe-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.timeframe-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                chartDays = parseInt(btn.dataset.days);
+                loadCharts();
+            });
+        });
+        
+        // ==================== BUILT VIEW ====================
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function loadBuiltView() {
+            // Load commits
+            try {
+                const res = await fetch('/api/commits');
+                const data = await res.json();
+                const commitsList = document.getElementById('commits-list');
+                const commitCount = document.getElementById('commit-count');
+                
+                if (data.commits && data.commits.length > 0) {
+                    commitCount.textContent = data.commits.length;
+                    commitsList.innerHTML = data.commits.slice(0, 8).map(c => `
+                        <div class="commit-item">
+                            <span class="commit-hash">${c.hash}</span>
+                            <div class="commit-msg">${escapeHtml(c.message)}</div>
+                            <div class="commit-time">${c.time || ''}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    commitCount.textContent = '0';
+                    commitsList.innerHTML = '<div class="loading-placeholder">No commits yet</div>';
+                }
+            } catch (e) {
+                document.getElementById('commits-list').innerHTML = '<div class="loading-placeholder">Failed to load</div>';
+            }
+            
+            // Load art
+            try {
+                const res = await fetch('/api/gallery');
+                const data = await res.json();
+                const artList = document.getElementById('art-list');
+                const artCount = document.getElementById('art-count');
+                
+                if (data.art && data.art.length > 0) {
+                    artCount.textContent = data.art.length;
+                    const typeLabels = {
+                        'ascii': 'ASCII',
+                        'poetry': 'POEM',
+                        'haiku': 'HAIKU',
+                        'microfiction': 'STORY',
+                        'lyrics': 'LYRICS',
+                        'puzzle': 'PUZZLE',
+                        'code_art': 'CODE'
+                    };
+                    artList.innerHTML = data.art.slice(0, 5).map(art => `
+                        <div class="art-item">
+                            <div class="art-item-header">
+                                <span class="art-type">[${typeLabels[art.type] || art.type}]</span>
+                                <span class="art-date">${art.date}</span>
+                            </div>
+                            <div class="art-content">${escapeHtml(art.content.substring(0, 400))}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    artCount.textContent = '0';
+                    artList.innerHTML = '<div class="loading-placeholder">No art yet</div>';
+                }
+            } catch (e) {
+                document.getElementById('art-list').innerHTML = '<div class="loading-placeholder">Failed to load</div>';
+            }
+        }
+        
+        // ==================== HARDWARE ====================
+        async function updateHardware() {
+            try {
+                const res = await fetch('/stats');
+                const data = await res.json();
+                
+                document.getElementById('sys-cpu').textContent = data.cpu + '%';
+                document.getElementById('cpu-bar').style.width = data.cpu + '%';
+                document.getElementById('status-cpu').textContent = data.cpu + '%';
+                
+                document.getElementById('sys-ram').textContent = data.ram_used.toFixed(1) + 'GB';
+                document.getElementById('ram-bar').style.width = data.ram_percent + '%';
+                document.getElementById('status-ram').textContent = data.ram_used.toFixed(1) + 'GB';
+            } catch (e) {}
+        }
+        
+        // ==================== AGENT STATUS ====================
+        async function pollAgentStatus() {
+            try {
+                const res = await fetch('/agent-status');
+                const data = await res.json();
+                
+                setState(data.state || 'idle', data.activity, data.visualState);
+                updateContextHearts(data.contextPercent || 0);
+                
+                document.getElementById('status-cost').textContent = (data.todayCost || 0).toFixed(2);
+                document.getElementById('today-cost').textContent = '$' + (data.todayCost || 0).toFixed(2);
+                document.getElementById('stat-cost').textContent = '$' + (data.todayCost || 0).toFixed(2);
+                
+                const tokens = data.todayTokens || 0;
+                const tokensStr = tokens >= 1000000 ? (tokens/1000000).toFixed(1)+'M' : 
+                                  tokens >= 1000 ? (tokens/1000).toFixed(0)+'k' : tokens.toString();
+                document.getElementById('today-tokens').textContent = tokensStr;
+                document.getElementById('stat-tokens').textContent = tokensStr;
+                
+                document.getElementById('stat-context').textContent = (data.contextPercent || 0) + '%';
+                document.getElementById('stat-context-bar').style.width = (data.contextPercent || 0) + '%';
+                
+                if (data.model) {
+                    const short = data.model.replace('anthropic/', '').replace('claude-', '');
+                    document.getElementById('today-model').textContent = short;
+                }
+            } catch (e) {}
+        }
+        
+        // ==================== SCHEDULE ====================
+        async function fetchSchedule() {
+            try {
+                const res = await fetch('/schedule');
+                const data = await res.json();
+                const container = document.getElementById('schedule-list');
+                
+                if (!data.jobs || data.jobs.length === 0) {
+                    container.innerHTML = '<div class="schedule-empty">[EMPTY]</div>';
+                    return;
+                }
+                
+                // ASCII icons instead of emoji
+                const icons = {
+                    flamengo: 'GAME', game: 'GAME', reminder: 'BELL', backup: 'SAVE',
+                    report: 'DATA', email: 'MAIL', weather: 'WX', news: 'NEWS'
+                };
+                
+                container.innerHTML = data.jobs.slice(0, 6).map(job => {
+                    let icon = 'TASK';
+                    for (const [k, v] of Object.entries(icons)) {
+                        if (job.name.toLowerCase().includes(k)) { icon = v; break; }
+                    }
+                    return `
+                        <div class="schedule-item">
+                            <span class="schedule-icon">${icon}</span>
+                            <div class="schedule-info">
+                                <div class="schedule-name">${job.name}</div>
+                                <div class="schedule-time">${job.schedule}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                document.getElementById('schedule-list').innerHTML = '<div class="schedule-empty">Failed to load</div>';
+            }
+        }
+        
+        // ==================== WEBSOCKET ====================
+        let openClawWS = null;
+        
+        function initWebSocket() {
+            fetch('/config')
+                .then(r => r.json())
+                .then(cfg => startWebSocket(cfg.wsToken || cfg.token || ''))
+                .catch(() => startWebSocket(''));
+        }
+        
+        function updateWsIndicator(status) {
+            const dot = document.getElementById('ws-dot');
+            const label = document.getElementById('ws-label');
+            const wsStatus = document.getElementById('ws-status');
+            const gateway = document.getElementById('gateway-status');
+            
+            dot.className = 'ws-dot';
+            
+            if (status === 'authenticated' || status === 'connected') {
+                dot.classList.add('connected');
+                label.textContent = 'WS OK';
+                wsStatus.textContent = 'Connected';
+                gateway.textContent = 'Online';
+            } else if (status === 'connecting') {
+                dot.classList.add('connecting');
+                label.textContent = 'WS...';
+                wsStatus.textContent = 'Connecting';
+                gateway.textContent = 'Connecting';
+            } else {
+                dot.classList.add('error');
+                label.textContent = 'WS X';
+                wsStatus.textContent = 'Offline';
+                gateway.textContent = 'Offline';
+            }
+        }
+        
+        function startWebSocket(token) {
+            if (typeof OpenClawWebSocket === 'undefined') {
+                console.log('[WS] WebSocket library not available, using polling only');
+                updateWsIndicator('error');
+                return;
+            }
+            
+            openClawWS = new OpenClawWebSocket({
+                url: 'ws://localhost:18789',
+                token: token,
+                
+                onConnectionChange: (status) => {
+                    updateWsIndicator(status);
+                    if (status === 'authenticated') {
+                        logActivity('[WS] Connected');
+                    }
+                },
+                
+                onStatusChange: (state, activity, fullState) => {
+                    setState(state, activity);
+                    if (fullState.subagents > 0) {
+                        updateSubagents([{ label: `${fullState.subagents} active` }]);
+                    } else {
+                        updateSubagents([]);
+                    }
+                },
+                
+                onMessageEvent: (type, payload) => {
+                    if (type === 'received') {
+                        const sender = payload?.from || 'User';
+                        const text = payload?.text || payload?.message || 'Message';
+                        updateMessagePreview(text.substring(0, 80), 'user');
+                        logActivity(`[IN] ${sender}`);
+                    } else if (type === 'sent') {
+                        const text = payload?.text || 'Response';
+                        updateMessagePreview(text.substring(0, 80), 'claude');
+                    }
+                },
+                
+                onSubagentUpdate: (count, label) => {
+                    if (count > 0 && label) {
+                        logActivity(`[SUB] ${label}`);
+                    }
+                },
+                
+                onToolUse: (status, tool) => {
+                    if (status === 'started') {
+                        logActivity(`[TOOL] ${tool}`);
+                    }
+                },
+                
+                onLog: (msg) => console.log('[WS]', msg)
+            });
+            
+            openClawWS.connect();
+        }
+        
+        // ==================== SUBAGENTS POLLING ====================
+        async function fetchSubagents() {
+            try {
+                const res = await fetch('/api/subagents');
+                if (!res.ok) return;
+                const data = await res.json();
+                updateSubagents(data);
+            } catch (e) {}
+        }
+        
+        // ==================== INITIALIZATION ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('[Tamagotchi] v4.0 TAMA initialized');
+            
+            loadSettings();
+            setLobsterAnimation('idle');
+            
+            // Initial data loads
+            updateWeather();
+            updateCrypto();
+            updateHardware();
+            pollAgentStatus();
+            fetchSchedule();
+            fetchSubagents();
+            updateUptime();
+            
+            // WebSocket
+            initWebSocket();
+            
+            // Polling intervals
+            setInterval(updateWeather, 600000);    // 10 min
+            setInterval(updateCrypto, 60000);      // 1 min
+            setInterval(updateHardware, 30000);    // 30 sec
+            setInterval(pollAgentStatus, 5000);    // 5 sec
+            setInterval(fetchSchedule, 60000);     // 1 min
+            setInterval(fetchSubagents, 10000);    // 10 sec
+            
+            logActivity('System online');
+        });
+    </script>
+</body>
+</html>

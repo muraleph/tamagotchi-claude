@@ -84,6 +84,72 @@ function deriveVisualState(emotional, currentState) {
     return 'neutral';
 }
 
+/**
+ * Infer activity mood from recent actions
+ * Returns: { mood: string, emoji: string, color: string }
+ * Moods: curious, creative, focused, busy, social, resting
+ */
+function inferActivityMood(lastAction, state, previewItems) {
+    const action = (lastAction || '').toLowerCase();
+    
+    // Analyze preview items for patterns
+    let toolCalls = 0;
+    let searchCount = 0;
+    let editCount = 0;
+    let messageCount = 0;
+    let readCount = 0;
+    let artCount = 0;
+    
+    if (previewItems) {
+        for (const item of previewItems) {
+            const text = (item.text || '').toLowerCase();
+            if (text.startsWith('call ')) toolCalls++;
+            if (text.includes('search') || text.includes('web_fetch')) searchCount++;
+            if (text.includes('edit') || text.includes('write')) editCount++;
+            if (text.includes('message') || text.includes('telegram')) messageCount++;
+            if (text.includes('read')) readCount++;
+            if (text.includes('art') || text.includes('ascii') || text.includes('creative')) artCount++;
+        }
+    }
+    
+    // Curious: researching, reading, web searches
+    if (action.includes('search') || action.includes('fetching') || 
+        action.includes('reading') || searchCount >= 2 || readCount >= 3) {
+        return { mood: 'curious', emoji: '🔍', color: '#a8d8ea' };
+    }
+    
+    // Creative: art tasks, writing, generating content
+    if (action.includes('art') || action.includes('ascii') || action.includes('writing') ||
+        action.includes('generating') || artCount >= 1) {
+        return { mood: 'creative', emoji: '🎨', color: '#ffd3b6' };
+    }
+    
+    // Focused: code editing, debugging, precise work
+    if (action.includes('editing') || action.includes('edited') || 
+        action.includes('debugging') || editCount >= 2) {
+        return { mood: 'focused', emoji: '🔧', color: '#c9e4de' };
+    }
+    
+    // Social: messaging, responding to conversations
+    if (action.includes('message') || action.includes('telegram') || 
+        action.includes('responding') || messageCount >= 1) {
+        return { mood: 'social', emoji: '💬', color: '#fff5ba' };
+    }
+    
+    // Busy: lots of tool calls, heavy processing
+    if (toolCalls >= 4 || (state === 'working' && action.includes('processing'))) {
+        return { mood: 'busy', emoji: '⚡', color: '#ffaaa5' };
+    }
+    
+    // Resting/idle
+    if (state === 'idle') {
+        return { mood: 'resting', emoji: '🌙', color: '#dcedc1' };
+    }
+    
+    // Default: neutral/attentive
+    return { mood: 'attentive', emoji: '👀', color: '#d4e09b' };
+}
+
 let token = '';
 try {
     const configPath = path.join(process.env.HOME, '.openclaw/openclaw.json');
@@ -273,9 +339,14 @@ ws.onmessage = (e) => {
             const emotional = computeEmotionalState(statusObj);
             const visualState = deriveVisualState(emotional, state);
             
+            // Infer activity mood from recent actions
+            const previewItems = preview?.items || [];
+            const activityMood = inferActivityMood(lastAction, state, previewItems);
+            
             // Add emotional state to output
             statusObj.emotional = emotional;
             statusObj.visualState = visualState;
+            statusObj.activityMood = activityMood;
             
             console.log(JSON.stringify(statusObj));
             ws.close();

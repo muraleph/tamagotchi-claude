@@ -256,6 +256,40 @@
             margin-top: 4px;
         }
         
+        /* Activity mood badge - shows what I'm doing */
+        .activity-mood {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            color: var(--lcd-darkest);
+            padding: 4px 10px;
+            background: rgba(48, 98, 48, 0.15);
+            border: 2px solid var(--lcd-dark);
+            border-radius: 2px;
+            transition: background-color 0.5s ease, opacity 0.3s ease;
+            opacity: 0.9;
+        }
+        
+        .activity-mood-emoji {
+            font-size: 14px;
+            font-family: 'Segoe UI Emoji', 'Apple Color Emoji', sans-serif;
+        }
+        
+        .activity-mood-label {
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* Activity mood colors - subtle tints */
+        .activity-mood.curious { background: rgba(168, 216, 234, 0.35); }
+        .activity-mood.creative { background: rgba(255, 211, 182, 0.35); }
+        .activity-mood.focused { background: rgba(201, 228, 222, 0.35); }
+        .activity-mood.social { background: rgba(255, 245, 186, 0.35); }
+        .activity-mood.busy { background: rgba(255, 170, 165, 0.35); }
+        .activity-mood.resting { background: rgba(220, 237, 193, 0.35); }
+        .activity-mood.attentive { background: rgba(212, 224, 155, 0.35); }
+        
         /* Activity text - bigger */
         .activity-text {
             font-size: 14px;
@@ -1078,6 +1112,11 @@
                     
                     <div class="mood-indicator" id="mood-indicator">-_-</div>
                     
+                    <div class="activity-mood" id="activity-mood">
+                        <span class="activity-mood-emoji">👀</span>
+                        <span class="activity-mood-label">attentive</span>
+                    </div>
+                    
                     <div class="activity-text" id="activity-text">
                         Waiting for messages...
                     </div>
@@ -1561,7 +1600,7 @@
         }
         
         // ==================== STATE MANAGEMENT ====================
-        function setState(state, activity, visualState) {
+        function setState(state, activity, visualState, activityMood) {
             const oldState = currentState;
             currentState = state;
             
@@ -1589,6 +1628,24 @@
             
             document.getElementById('state-duration').classList.toggle('working', 
                 state === 'working' || state === 'thinking');
+            
+            // Update activity mood indicator
+            updateActivityMood(activityMood);
+        }
+        
+        function updateActivityMood(activityMood) {
+            const el = document.getElementById('activity-mood');
+            if (!el) return;
+            
+            // Default mood if not provided
+            const mood = activityMood || { mood: 'attentive', emoji: '👀' };
+            
+            // Update content
+            el.querySelector('.activity-mood-emoji').textContent = mood.emoji || '👀';
+            el.querySelector('.activity-mood-label').textContent = mood.mood || 'attentive';
+            
+            // Update class for color
+            el.className = 'activity-mood ' + (mood.mood || 'attentive');
         }
         
         function updateStateDuration() {
@@ -1948,7 +2005,7 @@
                 const res = await fetch('/agent-status');
                 const data = await res.json();
                 
-                setState(data.state || 'idle', data.activity, data.visualState);
+                setState(data.state || 'idle', data.activity, data.visualState, data.activityMood);
                 updateContextHearts(data.contextPercent || 0);
                 
                 document.getElementById('status-cost').textContent = (data.todayCost || 0).toFixed(2);
